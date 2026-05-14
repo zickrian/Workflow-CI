@@ -1,2 +1,1 @@
-https://hub.docker.com/repository/docker/zickrian/msml-model/general
-
+https://hub.docker.com/r/zickrian/msml-model
