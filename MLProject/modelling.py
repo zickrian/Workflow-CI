@@ -28,7 +28,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 # TRACKING & TRAINING 
-mlflow.sklearn.autolog()  
+mlflow.sklearn.autolog(log_models=False)
 
 with mlflow.start_run(run_name="RandomForest_Diabetes_Baseline") as run:
 	model = RandomForestClassifier(

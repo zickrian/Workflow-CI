@@ -78,11 +78,17 @@ jobs:
       - name: Build Docker model image
         working-directory: MLProject
         env:
-          MLFLOW_TRACKING_URI: file://${{ github.workspace }}/MLProject/mlruns
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           RUN_ID="${{ steps.runid.outputs.run_id }}"
           if [ -z "$RUN_ID" ]; then
             echo "ERROR: run_id is empty"
+            exit 1
+          fi
+
+          DOCKERHUB_USERNAME="$(printf '%s' "$DOCKERHUB_USERNAME" | tr -d '[:space:]')"
+          if [ -z "$DOCKERHUB_USERNAME" ]; then
+            echo "ERROR: Docker Hub username is empty"
             exit 1
           fi
           
@@ -97,20 +103,56 @@ jobs:
             exit 1
           fi
           
-          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/msml-model:latest"
-          mlflow models build-docker \
-            -m "runs:/$RUN_ID/model" \
-            -n "$IMAGE"
+          IMAGE="$DOCKERHUB_USERNAME/msml-model:latest"
+          cat > Dockerfile <<'EOF'
+          FROM python:3.12-slim
+
+          ARG RUN_ID
+
+          ENV RUN_ID="${RUN_ID}" \
+              MLFLOW_TRACKING_URI="file:///app/mlruns" \
+              PYTHONUNBUFFERED=1
+
+          WORKDIR /app
+
+          RUN apt-get update \
+              && apt-get install -y --no-install-recommends build-essential \
+              && rm -rf /var/lib/apt/lists/*
+
+          COPY requirements.txt /app/requirements.txt
+          RUN python -m pip install --upgrade pip \
+              && pip install --no-cache-dir -r /app/requirements.txt
+
+          COPY mlruns /app/mlruns
+
+          EXPOSE 8080
+
+          CMD mlflow models serve \
+              -m "runs:/${RUN_ID}/model" \
+              --host 0.0.0.0 \
+              --port 8080 \
+              --env-manager local
+          EOF
+
+          docker build \
+            --build-arg RUN_ID="$RUN_ID" \
+            -t "$IMAGE" \
+            .
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          DOCKERHUB_USERNAME="$(printf '%s' "$DOCKERHUB_USERNAME" | tr -d '[:space:]')"
+          echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
 
       - name: Push Docker image to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/msml-model:latest"
+          DOCKERHUB_USERNAME="$(printf '%s' "$DOCKERHUB_USERNAME" | tr -d '[:space:]')"
+          IMAGE="$DOCKERHUB_USERNAME/msml-model:latest"
           docker push "$IMAGE"
 
       - name: Complete job
